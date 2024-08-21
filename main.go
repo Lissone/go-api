@@ -1,46 +1,48 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
-func MiddlewareLog(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		begin := time.Now()
-		next.ServeHTTP(w, r)
-		fmt.Println(r.URL.String(), r.Method, time.Since(begin))
-	})
-}
-
 func main() {
-	mux := http.NewServeMux()
+	r := chi.NewMux()
 
-	mux.HandleFunc(
-		"/api/users/{foo}",
-		func(w http.ResponseWriter, r *http.Request) {
-			id := r.PathValue("foo")
-			fmt.Println(id)
-			fmt.Fprintln(w, "hello, world")
-		},
-	)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Logger)
 
-	server := &http.Server{
-		Addr:                         "localhost:8080",
-		Handler:                      MiddlewareLog(mux),
-		DisableGeneralOptionsHandler: false,
-		ReadTimeout:                  10 * time.Second,
-		WriteTimeout:                 10 * time.Second,
-		IdleTimeout:                  1 * time.Minute,
+	r.Get("/horario", func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		fmt.Fprintln(w, now)
+	})
+
+	r.Route("/api", func(r chi.Router) {
+		r.Route("/v1", func(r chi.Router) {
+			r.Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+		})
+
+		r.Route("/v2", func(r chi.Router) {
+		})
+
+		r.With(middleware.RealIP).Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.BasicAuth("", map[string]string{
+				"admin": "admin",
+			}))
+
+			r.Get("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintln(w, "ping")
+			})
+		})
+	})
+
+	if err := http.ListenAndServe("localhost:8080", r); err != nil {
+		panic(err)
 	}
-
-	if err := server.ListenAndServe(); err != nil {
-		if !errors.Is(err, http.ErrServerClosed) {
-			panic(err)
-		}
-	}
-
-	fmt.Println(1)
 }
